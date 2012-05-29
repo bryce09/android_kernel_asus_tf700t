@@ -1069,12 +1069,16 @@ void mem_cgroup_move_lists(struct page *page,
 static bool mem_cgroup_same_or_subtree(const struct mem_cgroup *root_mem,
 		struct mem_cgroup *mem)
 {
-	if (root_mem != mem) {
-		return (root_mem->use_hierarchy &&
-			css_is_ancestor(&mem->css, &root_mem->css));
-	}
+	bool ret;
 
-	return true;
+	if (root_memcg == memcg)
+		return true;
+	if (!root_memcg->use_hierarchy)
+		return false;
+	rcu_read_lock();
+	ret = css_is_ancestor(&memcg->css, &root_memcg->css);
+	rcu_read_unlock();
+	return ret;
 }
 
 int task_in_mem_cgroup(struct task_struct *task, const struct mem_cgroup *mem)
