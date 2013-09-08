@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <mach/board-cardhu-misc.h>
+#include <mach/overclock_config.h>
 
 #include "fuse.h"
 
@@ -573,7 +574,7 @@ int tegra_core_speedo_mv(void)
 		/* fall thru for T30L or T30SL */
 	case 2:
 		if (cpu_speedo_id != 13)
-			return 1300;
+			return CORE_VOLTAGE_CAP;
 		/* T37 */
 		return 1350;
 	case 3:
