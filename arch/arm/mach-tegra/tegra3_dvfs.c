@@ -80,7 +80,24 @@ static struct dvfs_rail *tegra3_dvfs_rails[] = {
 
 static int tegra3_get_core_floor_mv(int cpu_mv)
 {
-	return TF700T_MAX_CORE_VOLTAGE;
+ if (cpu_mv < 800)
+   return core_millivolts[0];
+ if (cpu_mv < 900)
+   return core_millivolts[1];
+ if (cpu_mv < 1000)
+   return core_millivolts[2];
+ if (cpu_mv < 1050)
+   return core_millivolts[3];
+ if (cpu_mv < 1100)
+   return core_millivolts[4];
+ if (cpu_mv < 1150)
+   return core_millivolts[5];
+ if (cpu_mv < 1175)
+   return core_millivolts[6];
+ if (cpu_mv < 1237)
+   return core_millivolts[7];
+ if (cpu_mv >= 1237)
+   return core_millivolts[8];
 }
 
 /* vdd_core must be >= min_level as a function of vdd_cpu */
