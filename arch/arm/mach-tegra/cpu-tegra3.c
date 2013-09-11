@@ -285,7 +285,7 @@ static void tegra_auto_hotplug_work_func(struct work_struct *work)
 	mutex_lock(tegra3_cpu_lock);
 
 	switch (hp_state) {
-	case TEGRA_HP_DISABLED:
+	//case TEGRA_HP_DISABLED:
 	case TEGRA_HP_IDLE:
 		break;
 	case TEGRA_HP_DOWN:
