@@ -23,11 +23,15 @@
 #include <linux/cpufreq.h>
 #include <linux/delay.h>
 #include <linux/hotplug.h>
+#include <linux/io.h>
+#include <linux/delay.h>
  
+#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/pm.h>
 #define DEFAULT_FIRST_LEVEL 60
 #define DEFAULT_CORES_ON_TOUCH 2
 #define HIGH_LOAD_COUNTER 20
 #define TIMER HZ
+
 
 struct cpu_stats
 {
@@ -43,10 +47,13 @@ static struct cpu_stats stats;
 static struct workqueue_struct *wq;
 static struct delayed_work decide_hotplug;
 
+extern void tegra_exit_lp_mode(void);
+extern void tegra_enter_lp_mode(void);
+
 static void decide_hotplug_func(struct work_struct *work)
 {
     int cpu;
-    int cpu_boost;
+    
 
 #if 0
     if (unlikely(is_touching && num_online_cpus() < stats.cores_on_touch))
@@ -60,7 +67,6 @@ static void decide_hotplug_func(struct work_struct *work)
         }
     }
 #endif
-    
     for_each_online_cpu(cpu) 
     {
         if (report_load_at_max_freq(cpu) >= stats.default_first_level)
@@ -81,9 +87,32 @@ static void decide_hotplug_func(struct work_struct *work)
             break;
         }
     }
+	//load_avg = stats.counter[0] + stats.counter[1];
 
+	/*if(load_avg >= 10)
+	{
+
+	if( !cpu_online(1))
+		cpu_up(1);
+	}
+	else
+	{
+		if(cpu_online(1))
+			cpu_down(1);
+	}*/
+	if ((stats.counter[0] + stats.counter[1]) < 10)
+	{
+		if (cpu_online(1))
+		{
+			cpu_down(1);
+		}
+	}
     if (stats.counter[0] >= 10)
     {
+		if (!cpu_online(1))
+		{
+			cpu_up(1);
+		}
         if (!cpu_online(2))
         {
             cpu_up(2);
@@ -112,7 +141,12 @@ static void decide_hotplug_func(struct work_struct *work)
             cpu_down(3);
         }   
     }
-
+#ifdef DEBUG_HOTPLUG
+	pr_info("HOTPLUG DEBUG\n");
+	pr_info("0: stats.counter:\t%d", stats.counter[0]);
+	pr_info("1: stats.counter:\t%d", stats.counter[1]);
+	//pr_info("load_avg 0,1:\t%d", load_avg);
+#endif
     queue_delayed_work(wq, &decide_hotplug, msecs_to_jiffies(TIMER));
 }
 
@@ -133,16 +167,22 @@ static void mako_hotplug_early_suspend(struct early_suspend *handler)
             cpu_down(cpu);
         }
     }
+	
+	//tegra_enter_lp_mode();
+	msleep(2000);
 }
+
 
 static void mako_hotplug_late_resume(struct early_suspend *handler)
 {  
     int cpu;
+	//tegra_exit_lp_mode();
 
+	//msleep(70);
     /* online all cores when the screen goes online */
-    for_each_possible_cpu(cpu) 
+    for(cpu = 0; cpu < 2; cpu++) 
     {
-        if (cpu) 
+        if (!cpu_online(cpu)) 
         {
             cpu_up(cpu);
         }
@@ -192,7 +232,7 @@ unsigned int get_cores_on_touch()
 int __init mako_hotplug_init(void)
 {
 	pr_info("Mako Hotplug driver started.\n");
-    
+
     /* init everything here */
     stats.total_cpus = num_present_cpus();
     stats.default_first_level = DEFAULT_FIRST_LEVEL;
