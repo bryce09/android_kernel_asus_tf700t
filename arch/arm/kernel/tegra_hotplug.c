@@ -25,13 +25,24 @@
 #include <linux/hotplug.h>
 #include <linux/io.h>
 #include <linux/delay.h>
+#include <linux/clk.h>
  
 #include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/pm.h>
+#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/cpu-tegra.h>
+#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/clock.h>
+
 #define DEFAULT_FIRST_LEVEL 60
 #define DEFAULT_CORES_ON_TOUCH 2
 #define HIGH_LOAD_COUNTER 20
 #define TIMER HZ
 
+
+extern int clk_set_parent(struct clk *c, struct clk *parent);
+
+
+static struct clk *cpu_clk;
+static struct clk *cpu_g_clk;
+static struct clk *cpu_lp_clk;
 
 struct cpu_stats
 {
@@ -87,19 +98,7 @@ static void decide_hotplug_func(struct work_struct *work)
             break;
         }
     }
-	//load_avg = stats.counter[0] + stats.counter[1];
-
-	/*if(load_avg >= 10)
-	{
-
-	if( !cpu_online(1))
-		cpu_up(1);
-	}
-	else
-	{
-		if(cpu_online(1))
-			cpu_down(1);
-	}*/
+	
 	if ((stats.counter[0] + stats.counter[1]) < 10)
 	{
 		if (cpu_online(1))
@@ -168,7 +167,17 @@ static void mako_hotplug_early_suspend(struct early_suspend *handler)
         }
     }
 	
-	//tegra_enter_lp_mode();
+	/* limit max frequency in order to enter lp mode */
+	tegra_update_cpu_speed(475);
+	if(!clk_set_parent(cpu_clk, cpu_lp_clk)) 
+	{
+		/*catch-up with governor target speed */
+		tegra_cpu_set_speed_cap(NULL);
+		/* process pending core requests*/
+#ifdef DEBUG_HOTPLUG
+		pr_info("Running Lp core\n");
+#endif
+	}
 	msleep(2000);
 }
 
@@ -176,10 +185,19 @@ static void mako_hotplug_early_suspend(struct early_suspend *handler)
 static void mako_hotplug_late_resume(struct early_suspend *handler)
 {  
     int cpu;
-	//tegra_exit_lp_mode();
-
-	//msleep(70);
-    /* online all cores when the screen goes online */
+	
+	if(!clk_set_parent(cpu_clk, cpu_g_clk)) 
+	{
+		/*catch-up with governor target speed */
+		tegra_cpu_set_speed_cap(NULL);
+		/* process pending core requests*/
+#ifdef DEBUG_HOTPLUG
+		pr_info("Running G Cluster\n");
+#endif
+	}
+	
+	msleep(70);
+    /* online 2 cores when the screen goes online */
     for(cpu = 0; cpu < 2; cpu++) 
     {
         if (!cpu_online(cpu)) 
@@ -233,6 +251,15 @@ int __init mako_hotplug_init(void)
 {
 	pr_info("Mako Hotplug driver started.\n");
 
+	cpu_clk = clk_get_sys(NULL, "cpu");
+	cpu_g_clk = clk_get_sys(NULL, "cpu_g");
+	cpu_lp_clk = clk_get_sys(NULL, "cpu_lp");
+
+	if (NULL ==(cpu_clk) || (cpu_g_clk)==NULL || (cpu_lp_clk)==NULL)
+	{
+		pr_info("Error getting cpu clocks....");
+		return -ENOENT;
+	}
     /* init everything here */
     stats.total_cpus = num_present_cpus();
     stats.default_first_level = DEFAULT_FIRST_LEVEL;
