@@ -1,2 +1,6 @@
 tmp_vmlinux1
 vmlinux.o
+tmp_*
+.tmp_vmlinux1
+.tmp_vmlinux2
+vmlinux
