@@ -4896,7 +4896,7 @@ static int clip_cpu_rate_limits(
 		return ret;
 	}
 	cpu_clk_lp->max_rate = freq_table[idx].frequency * 1000;
-	cpu_clk_g->min_rate = freq_table[idx-1].frequency * 1000;
+	cpu_clk_g->min_rate = 204 * 1000;
 	data->suspend_index = idx;
 	return 0;
 }
