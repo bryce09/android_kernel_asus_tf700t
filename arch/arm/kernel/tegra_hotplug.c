@@ -36,6 +36,11 @@
 #define HIGH_LOAD_COUNTER 20
 #define TIMER HZ
 
+/*
+ * 1000ms = 1 second
+ */
+#define MIN_TIME_CPU_ONLINE_MS 1500
+
 
 extern int clk_set_parent(struct clk *c, struct clk *parent);
 
@@ -52,14 +57,54 @@ struct cpu_stats
     unsigned int cores_on_touch;
 
     unsigned int counter[2];
+	unsigned long timestamp[2];
 };
 
 static struct cpu_stats stats;
 static struct workqueue_struct *wq;
 static struct delayed_work decide_hotplug;
 
-extern void tegra_exit_lp_mode(void);
-extern void tegra_enter_lp_mode(void);
+static inline void calc_cpu_hotplug(unsigned int counter0,
+									unsigned int counter1)
+{
+	bool online_cpu2 = counter0 >= 10;
+	bool online_cpu3 = counter1 >= 10;
+
+	if (online_cpu2)
+	{
+		if (cpu_is_offline(2))
+		{
+			cpu_up(2);
+			stats.timestamp[0] = ktime_to_ms(ktime_get());		
+		}
+	}
+	else if (cpu_online(2))
+	{
+		/*
+		 * Let's not unplug this cpu unless its been online for longer than 1
+		 * second to avoid consecutive ups and downs if the load is varying
+		 * closer to the threshold point.
+		 */
+		if (ktime_to_ms(ktime_get()) > MIN_TIME_CPU_ONLINE_MS 
+				+ stats.timestamp[0])
+			cpu_down(2);
+	} 
+
+	if (online_cpu3)
+	{
+		if (cpu_is_offline(3))
+		{
+			cpu_up(3);
+			stats.timestamp[1] = ktime_to_ms(ktime_get());		
+		}
+	}
+	else if (cpu_online(3))
+	{
+		if (ktime_to_ms(ktime_get()) > MIN_TIME_CPU_ONLINE_MS 
+				+ stats.timestamp[1])
+			cpu_down(3);
+	}
+}
 
 static void decide_hotplug_func(struct work_struct *work)
 {
@@ -98,48 +143,10 @@ static void decide_hotplug_func(struct work_struct *work)
             break;
         }
     }
-	
-	if ((stats.counter[0] + stats.counter[1]) < 10)
-	{
-		if (cpu_online(1))
-		{
-			cpu_down(1);
-		}
-	}
-    if (stats.counter[0] >= 10)
-    {
-		if (!cpu_online(1))
-		{
-			cpu_up(1);
-		}
-        if (!cpu_online(2))
-        {
-            cpu_up(2);
-        }
-    }
-    else
-    {
-        if (cpu_online(2))
-        {
-            cpu_down(2);
-        }   
-    }
-    
-    if (stats.counter[1] >= 10)
-    {
-        if (!cpu_online(3))
-        {
-            cpu_up(3);
-        }
-    }
 
-    else
-    {
-        if (cpu_online(3))
-        {
-            cpu_down(3);
-        }   
-    }
+	calc_cpu_hotplug(stats.counter[0], stats.counter[1]);
+	
+	
 #ifdef DEBUG_HOTPLUG
 	pr_info("HOTPLUG DEBUG\n");
 	pr_info("0: stats.counter:\t%d", stats.counter[0]);
