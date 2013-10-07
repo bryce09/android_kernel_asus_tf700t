@@ -28,6 +28,7 @@
 #include <linux/miscdevice.h>
 #include <linux/debugfs.h>
 #include <linux/irq.h>
+#include <linux/syscalls.h>
 
 // for linux 2.6.36.3
 #include <linux/cdev.h>
@@ -189,6 +190,30 @@ static int debug = DEBUG_INFO;
 #define DEBUG_INFO     2
 #define DEBUG_MESSAGES 5
 #define DEBUG_TRACE   10
+
+#define BOOSTPULSE "/sys/devices/system/cpu/cpufreq/interactive/boostpulse"
+
+struct boost_mako {
+	int boostpulse_fd;
+};
+
+static struct boost_mako boost;
+
+static int boostpulse_open(void)
+{
+	if (boost.boostpulse_fd < 0)
+	{
+		boost.boostpulse_fd = sys_open(BOOSTPULSE, O_WRONLY, 0);
+
+		if (boost.boostpulse_fd < 0)
+		{
+			pr_info("Error opening %s\n", BOOSTPULSE);
+			return -1;		
+		}
+	}
+
+	return boost.boostpulse_fd;
+}
 
 // For Firmware Update 
 /* Todo: (1) Need to Add the lock mechanism
@@ -1005,6 +1030,7 @@ static void process_resp_message(struct elan_ktf3k_ts_data *ts, const unsigned c
 static void elan_ktf3k_ts_work_func(struct work_struct *work)
 {
         int rc;
+		int len;
         struct elan_ktf3k_ts_data *ts =
                 container_of(work, struct elan_ktf3k_ts_data, work);
         uint8_t buf[NEW_PACKET_SIZE + 4] = { 0 };
@@ -1012,7 +1038,15 @@ static void elan_ktf3k_ts_work_func(struct work_struct *work)
         uint8_t buf2[NEW_PACKET_SIZE] = { 0 };
 
         if(work_lock==0) {
+			if (boostpulse_open() >= 0)
+			{
+				len = sys_write(boost.boostpulse_fd, "1", sizeof(BOOSTPULSE));
 
+				if (len < 0)
+				{
+					pr_info("Error writing to %s\n", BOOSTPULSE);			
+				}
+			}
 #ifndef ELAN_BUFFER_MODE
                 rc = elan_ktf3k_ts_recv_data(ts->client, buf, 40);
 #else
@@ -1285,6 +1319,10 @@ static int elan_ktf3k_ts_probe(struct i2c_client *client,
 	int err = 0;
 	struct elan_ktf3k_i2c_platform_data *pdata;
 	struct elan_ktf3k_ts_data *ts;
+
+	boost.boostpulse_fd = -1;
+
+
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		printk(KERN_ERR "[elan] %s: i2c check functionality error\n", __func__);
 		err = -ENODEV;
