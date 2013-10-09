@@ -64,7 +64,7 @@ static spinlock_t speedchange_cpumask_lock;
 static struct mutex gov_lock;
 
 /* Hi speed to bump to from lo speed when load burst (default max) */
-static unsigned int hispeed_freq = 1242000;
+static unsigned int hispeed_freq = 1000000;
 
 /* Go to hi speed when CPU load at or above this value. */
 #define DEFAULT_GO_HISPEED_LOAD 99
@@ -120,7 +120,7 @@ static bool io_is_busy = true;
  * The CPU will be boosted to this frequency when the screen is
  * touched. input_boost needs to be enabled.
  */
-#define DEFAULT_INPUT_BOOST_FREQ 1242000
+#define DEFAULT_INPUT_BOOST_FREQ 1300000
 static int input_boost_freq;
 
 bool interactive_selected = true;
@@ -147,12 +147,12 @@ static inline cputime64_t get_cpu_idle_time_jiffy(unsigned int cpu,
 
 	cur_wall_time = jiffies64_to_cputime64(get_jiffies_64());
 
-	busy_time  = kcpustat_cpu(cpu).cpustat[CPUTIME_USER];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_SYSTEM];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_IRQ];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_SOFTIRQ];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_STEAL];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_NICE];
+	busy_time = cputime64_add(kstat_cpu(cpu).cpustat.user,
+                              kstat_cpu(cpu).cpustat.system);
+    busy_time = cputime64_add(busy_time, kstat_cpu(cpu).cpustat.irq);
+    busy_time = cputime64_add(busy_time, kstat_cpu(cpu).cpustat.softirq);
+    busy_time = cputime64_add(busy_time, kstat_cpu(cpu).cpustat.steal);
+    busy_time = cputime64_add(busy_time, kstat_cpu(cpu).cpustat.nice);
 
 	idle_time = cur_wall_time - busy_time;
 	if (wall)
