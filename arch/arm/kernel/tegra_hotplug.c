@@ -175,7 +175,7 @@ static void mako_hotplug_early_suspend(struct early_suspend *handler)
     }
 	
 	/* limit max frequency in order to enter lp mode */
-	tegra_update_cpu_speed(475);
+	tegra_update_cpu_speed(475*1000);
 	if(!clk_set_parent(cpu_clk, cpu_lp_clk)) 
 	{
 		/*catch-up with governor target speed */
@@ -185,7 +185,6 @@ static void mako_hotplug_early_suspend(struct early_suspend *handler)
 		pr_info("Running Lp core\n");
 #endif
 	}
-	msleep(2000);
 }
 
 
@@ -274,7 +273,7 @@ int __init mako_hotplug_init(void)
     stats.counter[0] = 0;
     stats.counter[1] = 0;
 
-    wq = alloc_workqueue("mako_hotplug_workqueue", WQ_FREEZABLE, 1);
+    wq = alloc_workqueue("mako_hotplug_workqueue", WQ_UNBOUND | WQ_RESCUER | WQ_FREEZABLE, 1);
     
     if (!wq)
         return -ENOMEM;
