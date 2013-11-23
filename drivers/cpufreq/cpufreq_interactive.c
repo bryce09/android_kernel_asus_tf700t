@@ -123,7 +123,7 @@ static bool io_is_busy = true;
  * touched. input_boost needs to be enabled.
  */
 #define DEFAULT_INPUT_BOOST_FREQ 1000000
-static int input_boost_freq;
+static int input_boost_freq = DEFAULT_INPUT_BOOST_FREQ;
 
 bool interactive_selected = true;
 
