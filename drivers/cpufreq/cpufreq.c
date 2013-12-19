@@ -207,6 +207,12 @@ err_out_unlock:
 err_out:
 	return NULL;
 }
+
+struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
+{
+	return __cpufreq_cpu_get(cpu, 0);
+}
+
 EXPORT_SYMBOL_GPL(cpufreq_cpu_get);
 
 
