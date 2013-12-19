@@ -794,8 +794,8 @@ err_kfree:
 err:
 	return ERR_PTR(err);
 }
-
-static int thread_migration_notify(struct notifier_block *nb,
+//THREAD MIGRATION bryce
+/* static int thread_migration_notify(struct notifier_block *nb,
 				unsigned long target_cpu, void *arg)
 {
 	unsigned long flags;
@@ -826,7 +826,7 @@ static int thread_migration_notify(struct notifier_block *nb,
 static struct notifier_block thread_migration_nb = {
 	.notifier_call = thread_migration_notify,
 };
-
+*/
 static ssize_t show_target_loads(
 	struct kobject *kobj, struct attribute *attr, char *buf)
 {
@@ -1279,8 +1279,8 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			return rc;
 		}
 
-		atomic_notifier_chain_register(&migration_notifier_head,
-					&thread_migration_nb);
+		/*atomic_notifier_chain_register(&migration_notifier_head,
+					&thread_migration_nb); bryce */
 
 		idle_notifier_register(&cpufreq_interactive_idle_nb);
 		cpufreq_register_notifier(
@@ -1304,9 +1304,9 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			return 0;
 		}
 
-		atomic_notifier_chain_unregister(
+		/* atomic_notifier_chain_unregister(
 				&migration_notifier_head,
-				&thread_migration_nb);
+				&thread_migration_nb); bryce */
 
 		cpufreq_unregister_notifier(
 			&cpufreq_notifier_block, CPUFREQ_TRANSITION_NOTIFIER);
