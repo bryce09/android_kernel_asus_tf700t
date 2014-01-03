@@ -1290,8 +1290,6 @@ static int elan_ktf3k_ts_probe(struct i2c_client *client,
 	struct elan_ktf3k_i2c_platform_data *pdata;
 	struct elan_ktf3k_ts_data *ts;
 
-	boost.boostpulse_fd = -1;
-
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		printk(KERN_ERR "[elan] %s: i2c check functionality error\n", __func__);
