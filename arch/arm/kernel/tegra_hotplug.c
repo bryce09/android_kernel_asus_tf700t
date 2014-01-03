@@ -39,7 +39,6 @@
 
 #define MIN_TIME_CPU_ONLINE HZ
 
-extern int *mTouchStatus;
 
 static struct cpu_stats
 {
@@ -120,8 +119,8 @@ static void __ref decide_hotplug_func(struct work_struct *work)
         int cpu_nr = 2;
         unsigned int cur_load;
         
-        if (mTouchStatus[0] != 0)
-        {
+    #if 0   
+        
                 for (i = num_online_cpus(); i < stats.cores_on_touch; i++)
                 {
                         if (cpu_is_offline(i))
@@ -132,8 +131,8 @@ static void __ref decide_hotplug_func(struct work_struct *work)
                 }
 				pr_info("Touch detected reque\n");
                 goto re_queue;
-        }
-
+        
+		#endif
     for_each_online_cpu(cpu) 
     {
                 cur_load = get_cpu_load(cpu);
