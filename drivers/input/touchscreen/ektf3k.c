@@ -191,29 +191,7 @@ static int debug = DEBUG_INFO;
 #define DEBUG_MESSAGES 5
 #define DEBUG_TRACE   10
 
-#define BOOSTPULSE "/sys/devices/system/cpu/cpufreq/interactive/boostpulse"
 
-struct boost_mako {
-	int boostpulse_fd;
-};
-
-static struct boost_mako boost;
-
-static int boostpulse_open(void)
-{
-	if (boost.boostpulse_fd < 0)
-	{
-		boost.boostpulse_fd = sys_open(BOOSTPULSE, O_WRONLY, 0);
-
-		if (boost.boostpulse_fd < 0)
-		{
-			pr_info("Error opening %s\n", BOOSTPULSE);
-			return -1;		
-		}
-	}
-
-	return boost.boostpulse_fd;
-}
 
 // For Firmware Update 
 /* Todo: (1) Need to Add the lock mechanism
@@ -1038,15 +1016,7 @@ static void elan_ktf3k_ts_work_func(struct work_struct *work)
         uint8_t buf2[NEW_PACKET_SIZE] = { 0 };
 
         if(work_lock==0) {
-			if (boostpulse_open() >= 0)
-			{
-				len = sys_write(boost.boostpulse_fd, "1", sizeof(BOOSTPULSE));
-
-				if (len < 0)
-				{
-					pr_info("Error writing to %s\n", BOOSTPULSE);			
-				}
-			}
+			
 #ifndef ELAN_BUFFER_MODE
                 rc = elan_ktf3k_ts_recv_data(ts->client, buf, 40);
 #else
