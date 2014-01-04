@@ -25,12 +25,19 @@
 #include <linux/hotplug.h>
 #include <linux/input.h>
 #include <linux/jiffies.h>
+#include <linux/clk.h>
 
 
-/*#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/pm.h>
+
 #include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/cpu-tegra.h>
-#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/clock.h>*/
+#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/clock.h>
 
+
+extern int clk_set_parent(struct clk *c, struct clk *parent);
+
+static struct clk *cpu_clk;
+static struct clk *cpu_g_clk;
+static struct clk *cpu_lp_clk;
 
 #define DEFAULT_FIRST_LEVEL 60
 #define DEFAULT_CORES_ON_TOUCH 2
@@ -45,7 +52,8 @@ static struct cpu_stats
     unsigned int default_first_level;
     unsigned int cores_on_touch;
     unsigned int counter[2];
-    unsigned long timestamp[2];
+    unsigned long timestamp[3];
+	bool g_cluster_active;
 } stats = {
     .default_first_level = DEFAULT_FIRST_LEVEL,
     .cores_on_touch = DEFAULT_CORES_ON_TOUCH,
@@ -89,9 +97,72 @@ static inline int get_cpu_load(unsigned int cpu)
 
         cur_load = 100 * (wall_time - idle_time) / wall_time;
 
+		if(!stats.g_cluster_active) 
+			return (cur_load * policy.cur) / (620*1000);
+		
         return (cur_load * policy.cur) / policy.max;
 }
 
+ void g_cluster_revive()
+{
+	int cpu;
+
+	if(stats.g_cluster_active) return;
+
+	if(!clk_set_parent(cpu_clk, cpu_g_clk)) 
+	{
+		/*catch-up with governor target speed */
+		tegra_cpu_set_speed_cap(NULL);
+		/* process pending core requests*/
+#ifdef DEBUG_HOTPLUG
+		pr_info("Running G Cluster\n");
+#endif
+	}
+
+	for(cpu = 0; cpu < 2; cpu++) 
+    {
+        if (!cpu_online(cpu)) 
+        {
+            cpu_up(cpu);
+			stats.timestamp[cpu] = jiffies;
+        }
+    }
+	stats.g_cluster_active = true;
+	stats.timestamp[2] = jiffies;
+}
+
+static void g_cluster_smash()
+{
+	int cpu = 0;
+
+	if(!stats.g_cluster_active) return;
+	if (time_is_after_jiffies(stats.timestamp[2] + 4*MIN_TIME_CPU_ONLINE))
+                return;
+	for_each_online_cpu(cpu) 
+    {
+        if (cpu) 
+        {
+            cpu_down(cpu);
+        }
+    }
+	stats.counter[0] = 0;
+	stats.counter[1] = 0;
+
+	/* limit max frequency in order to enter lp mode */
+	tegra_update_cpu_speed(475*1000);
+
+	if(!clk_set_parent(cpu_clk, cpu_lp_clk)) 
+	{
+		/*catch-up with governor target speed */
+		tegra_cpu_set_speed_cap(NULL);
+		/* process pending core requests*/
+#ifdef DEBUG_HOTPLUG
+		pr_info("Running Lp core\n");
+#endif
+	}
+	stats.g_cluster_active = false;
+	//stats.default_first_level = 30;
+}
 static void cpu_revive(unsigned int cpu)
 {
         cpu_up(cpu);
@@ -139,11 +210,17 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 
                 if (cur_load >= stats.default_first_level)
                 {
-                        if (likely(stats.counter[cpu] < HIGH_LOAD_COUNTER))    
-                                stats.counter[cpu] += 2;
+						stats.timestamp[2]=jiffies;
+                        if (likely(stats.counter[cpu] < HIGH_LOAD_COUNTER)) 
+                                {stats.counter[cpu] += 2; }
 
                         if (cpu_is_offline(cpu_nr) && stats.counter[cpu] >= 10)
                                 cpu_revive(cpu_nr);
+						if(!stats.g_cluster_active && stats.counter[0] >= 10)
+						{
+								g_cluster_revive();
+								break;
+						}
                 }
 
                 else
@@ -152,7 +229,12 @@ static void __ref decide_hotplug_func(struct work_struct *work)
                                 --stats.counter[cpu];
 
                         if (cpu_online(cpu_nr) && stats.counter[cpu] < 10)
+						{
                                 cpu_smash(cpu_nr);
+						}
+						if ( stats.g_cluster_active && (stats.counter[0] + stats.counter[1] < 5))
+								g_cluster_smash();
+									
                 }
 
                 cpu_nr++;
@@ -176,16 +258,7 @@ static void suspend_func(struct work_struct *work)
 
     pr_info("Early Suspend stopping Hotplug work...\n");
     
-    for_each_online_cpu(cpu) 
-    {
-        if (cpu) 
-            cpu_down(cpu);
-    }
-
-        /* reset the counters so that we start clean next time the display is on */
-    stats.counter[0] = 0;
-    stats.counter[1] = 0;
-     
+    g_cluster_smash();	
 }
 
 static void __ref resume_func(struct work_struct *work)
@@ -197,12 +270,7 @@ static void __ref resume_func(struct work_struct *work)
        
     pr_info("Cpulimit: Late resume - restore cpu%d max frequency.\n", 0);
 
-    /* online all cores when the screen goes online */
-    for_each_possible_cpu(cpu) 
-    {
-        if (cpu) 
-            cpu_up(cpu);
-    }
+    g_cluster_revive();
     
     pr_info("Late Resume starting Hotplug work...\n");
     queue_delayed_work(wq, &decide_hotplug, HZ * 2);        
@@ -251,7 +319,17 @@ unsigned int get_cores_on_touch()
 
 int __init mako_hotplug_init(void)
 {
-        pr_info("Mako Hotplug driver started.\n");
+    pr_info("Mako Hotplug driver started.\n");
+
+	cpu_clk = clk_get_sys(NULL, "cpu");
+	cpu_g_clk = clk_get_sys(NULL, "cpu_g");
+	cpu_lp_clk = clk_get_sys(NULL, "cpu_lp");
+
+	if (NULL ==(cpu_clk) || (cpu_g_clk)==NULL || (cpu_lp_clk)==NULL)
+	{
+		pr_info("Error getting cpu clocks....");
+		return -ENOENT;
+	}
 
     wq = alloc_ordered_workqueue("mako_hotplug_workqueue", 0);
     
@@ -264,7 +342,9 @@ int __init mako_hotplug_init(void)
         return -ENOMEM;
 
         stats.timestamp[0] = jiffies;
-        stats.timestamp[1] = jiffies;    
+        stats.timestamp[1] = jiffies;  
+		stats.timestamp[2] = jiffies;
+		stats.g_cluster_active = true;  
 
     INIT_DELAYED_WORK(&decide_hotplug, decide_hotplug_func);
         INIT_WORK(&resume, resume_func);

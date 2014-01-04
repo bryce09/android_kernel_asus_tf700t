@@ -43,10 +43,14 @@ u64 last_input_time;
 static struct workqueue_struct *input_boost_wq;
 static struct work_struct input_boost_work;
 
+extern  void g_cluster_revive();
+
 static void do_input_boost(struct work_struct *work)
 {
 	unsigned int i, ret;
 	struct cpufreq_policy policy;
+	
+	g_cluster_revive();
 
 	for_each_online_cpu(i) 
 	{
