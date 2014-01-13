@@ -44,7 +44,8 @@ static struct clk *cpu_lp_clk;
 #define HIGH_LOAD_COUNTER 20
 #define TIMER HZ
 
-#define MIN_TIME_CPU_ONLINE HZ
+#define MIN_TIME_CPU_ONLINE 1*HZ
+#define MIN_TIME_G_ONLINE 3*HZ
 
 
 static struct cpu_stats
@@ -74,6 +75,17 @@ static struct delayed_work decide_hotplug;
 static struct work_struct resume;
 static struct work_struct suspend;
 
+static DEFINE_MUTEX(hotplug_lock);
+
+bool is_g_cluster()
+{
+	bool ret;
+	mutex_lock(&hotplug_lock);
+	ret = stats.g_cluster_active;
+	mutex_unlock(&hotplug_lock);
+	return ret;
+}
+
 static inline int get_cpu_load(unsigned int cpu)
 {
         struct cpu_load_data *pcpu = &per_cpu(cpuload, cpu);
@@ -97,7 +109,7 @@ static inline int get_cpu_load(unsigned int cpu)
 
         cur_load = 100 * (wall_time - idle_time) / wall_time;
 
-		if(!stats.g_cluster_active) 
+		if(is_g_cluster()) 
 			return (cur_load * policy.cur) / (620*1000);
 		
         return (cur_load * policy.cur) / policy.max;
@@ -106,8 +118,6 @@ static inline int get_cpu_load(unsigned int cpu)
  void g_cluster_revive()
 {
 	int cpu;
-
-	if(stats.g_cluster_active) return;
 
 	if(!clk_set_parent(cpu_clk, cpu_g_clk)) 
 	{
@@ -118,7 +128,7 @@ static inline int get_cpu_load(unsigned int cpu)
 		pr_info("Running G Cluster\n");
 #endif
 	}
-
+	mutex_lock(&hotplug_lock);
 	for(cpu = 0; cpu < 2; cpu++) 
     {
         if (!cpu_online(cpu)) 
@@ -129,14 +139,14 @@ static inline int get_cpu_load(unsigned int cpu)
     }
 	stats.g_cluster_active = true;
 	stats.timestamp[2] = jiffies;
+	mutex_unlock(&hotplug_lock);
 }
 
 static void g_cluster_smash()
 {
 	int cpu = 0;
 
-	if(!stats.g_cluster_active) return;
-	if (time_is_after_jiffies(stats.timestamp[2] + 4*MIN_TIME_CPU_ONLINE))
+	if (time_is_after_jiffies(stats.timestamp[2] + MIN_TIME_G_ONLINE))
                 return;
 	for_each_online_cpu(cpu) 
     {
@@ -145,8 +155,7 @@ static void g_cluster_smash()
             cpu_down(cpu);
         }
     }
-	stats.counter[0] = 0;
-	stats.counter[1] = 0;
+	
 
 	/* limit max frequency in order to enter lp mode */
 	tegra_update_cpu_speed(475*1000);
@@ -160,8 +169,12 @@ static void g_cluster_smash()
 		pr_info("Running Lp core\n");
 #endif
 	}
+
+	mutex_lock(&hotplug_lock);
+	stats.counter[0] = 0;
+	stats.counter[1] = 0;
 	stats.g_cluster_active = false;
-	//stats.default_first_level = 30;
+	mutex_unlock(&hotplug_lock);
 }
 static void cpu_revive(unsigned int cpu)
 {
@@ -216,7 +229,7 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 
                         if (cpu_is_offline(cpu_nr) && stats.counter[cpu] >= 10)
                                 cpu_revive(cpu_nr);
-						if(!stats.g_cluster_active && stats.counter[0] >= 10)
+						if(!is_g_cluster() && stats.counter[0] >= 10)
 						{
 								g_cluster_revive();
 								break;
@@ -232,7 +245,7 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 						{
                                 cpu_smash(cpu_nr);
 						}
-						if ( stats.g_cluster_active && (stats.counter[0] + stats.counter[1] < 5))
+						if ( is_g_cluster() && (stats.counter[0] + stats.counter[1] < 5))
 								g_cluster_smash();
 									
                 }
@@ -254,18 +267,16 @@ static void suspend_func(struct work_struct *work)
     /* cancel the hotplug work when the screen is off and flush the WQ */
         flush_workqueue(wq);
     cancel_delayed_work_sync(&decide_hotplug);
-        cancel_work_sync(&resume);
 
     pr_info("Early Suspend stopping Hotplug work...\n");
     
-    g_cluster_smash();	
+	if(is_g_cluster())
+    	g_cluster_smash();	
 }
 
 static void __ref resume_func(struct work_struct *work)
 {
         int cpu;
-
-        cancel_work_sync(&suspend);
 
        
     pr_info("Cpulimit: Late resume - restore cpu%d max frequency.\n", 0);
@@ -273,7 +284,8 @@ static void __ref resume_func(struct work_struct *work)
     g_cluster_revive();
     
     pr_info("Late Resume starting Hotplug work...\n");
-    queue_delayed_work(wq, &decide_hotplug, HZ * 2);        
+    queue_delayed_work(wq, &decide_hotplug, HZ * 2);
+        
 }
 
 static void mako_hotplug_early_suspend(struct early_suspend *handler)

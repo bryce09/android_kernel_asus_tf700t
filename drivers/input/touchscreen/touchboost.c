@@ -89,13 +89,15 @@ static void do_rem_input_boost(struct work_struct *work)
 }
 
 extern  void g_cluster_revive();
+extern  bool is_g_cluster();
 
 static void do_input_boost(struct work_struct *work)
 {
 	unsigned int i, ret;
 	struct cpufreq_policy policy;
 	
-	g_cluster_revive();
+	if(!is_g_cluster())
+		g_cluster_revive();
 
 	boost_freq_buf = input_boost_freq;
 
