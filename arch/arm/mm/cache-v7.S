@@ -47,7 +47,7 @@ ENTRY(v7_flush_dcache_louis)
 	mov	r3, r3, lsr #20			@ r3 = LoUIS * 2
 	moveq	pc, lr				@ return if level == 0
 	mov	r10, #0				@ r10 (starting level) = 0
-	b	loop1				@ start flushing cache levels
+	b	1001f				@ start flushing cache levels
 ENDPROC(v7_flush_dcache_louis)
 
 /*
