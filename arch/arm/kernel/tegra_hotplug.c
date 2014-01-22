@@ -13,24 +13,27 @@
  * Simple no bullshit hot[un]plug driver for SMP
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/cpu.h>
 #include <linux/workqueue.h>
 #include <linux/sched.h>
+#include <linux/platform_device.h>
 #include <linux/timer.h>
-#include <linux/earlysuspend.h>
 #include <linux/cpufreq.h>
 #include <linux/delay.h>
 #include <linux/hotplug.h>
 #include <linux/input.h>
 #include <linux/jiffies.h>
+
 #include <linux/clk.h>
-
-
-
 #include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/cpu-tegra.h>
 #include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/clock.h>
+
+#include <linux/earlysuspend.h>
+
+#define MAKO_HOTPLUG "mako_hotplug"
 
 extern int clk_set_parent(struct clk *c, struct clk *parent);
 
@@ -68,10 +71,9 @@ struct cpu_load_data {
 static DEFINE_PER_CPU(struct cpu_load_data, cpuload);
 
 static struct workqueue_struct *wq;
-static struct workqueue_struct *pm_wq;
 static struct delayed_work decide_hotplug;
-static struct work_struct resume;
 static struct work_struct suspend;
+static struct work_struct resume;
 
 static DEFINE_MUTEX(hotplug_lock);
 
@@ -113,6 +115,20 @@ static inline int get_cpu_load(unsigned int cpu)
 		
         return (cur_load * policy.cur) / policy.max;
 }
+inline void set_timestamp_g()
+{
+	mutex_lock(&hotplug_lock);
+	stats.timestamp[2] = jiffies;
+	mutex_unlock(&hotplug_lock);
+}
+inline unsigned long get_timestamp_g()
+{
+	unsigned long t;
+	mutex_lock(&hotplug_lock);
+	t = stats.timestamp[2];
+	mutex_unlock(&hotplug_lock);
+	return t;
+}
 
  void g_cluster_revive()
 {
@@ -145,7 +161,7 @@ static void g_cluster_smash()
 {
 	int cpu = 0;
 
-	if (time_is_after_jiffies(stats.timestamp[2] + stats.min_time_g_cluster))
+	if (time_is_after_jiffies(get_timestamp_g() + stats.min_time_g_cluster))
                 return;
 	for_each_online_cpu(cpu) 
     {
@@ -198,7 +214,6 @@ static void cpu_smash(unsigned int cpu)
 static void __ref decide_hotplug_func(struct work_struct *work)
 {
     int cpu;
-        int i;
         int cpu_nr = 2;
         unsigned int cur_load;
     
@@ -208,17 +223,24 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 
                 if (cur_load >= stats.default_first_level)
                 {
-						stats.timestamp[2]=jiffies;
                         if (likely(stats.counter[cpu] < HIGH_LOAD_COUNTER)) 
                                 {stats.counter[cpu] += 2; }
 
                         if (cpu_is_offline(cpu_nr) && stats.counter[cpu] >= 10)
                                 cpu_revive(cpu_nr);
-						if(!is_g_cluster() && stats.counter[0] >= 10)
+						if(!is_g_cluster())
 						{
+							if(stats.counter[0] >= 10) 
+							{
 								g_cluster_revive();
 								break;
+							}
 						}
+						else
+						{
+							set_timestamp_g();
+						}
+						
                 }
 
                 else
@@ -242,16 +264,12 @@ static void __ref decide_hotplug_func(struct work_struct *work)
         }
 
 re_queue:        
-    queue_delayed_work(wq, &decide_hotplug, msecs_to_jiffies(TIMER));
+    queue_delayed_work_on(0, wq, &decide_hotplug, msecs_to_jiffies(TIMER));
 }
 
-static void suspend_func(struct work_struct *work)
+static void mako_hotplug_suspend(struct work_struct *work)
 {
-        int cpu;
-
-    /* cancel the hotplug work when the screen is off and flush the WQ */
-        flush_workqueue(wq);
-    cancel_delayed_work_sync(&decide_hotplug);
+    int cpu;
 
     pr_info("Early Suspend stopping Hotplug work...\n");
     
@@ -259,35 +277,28 @@ static void suspend_func(struct work_struct *work)
     	g_cluster_smash();	
 }
 
-static void __ref resume_func(struct work_struct *work)
+static void __ref mako_hotplug_resume(struct work_struct *work)
 {
-        int cpu;
+    int cpu;
 
-       
-    pr_info("Cpulimit: Late resume - restore cpu%d max frequency.\n", 0);
-
-    g_cluster_revive();
-    
-    pr_info("Late Resume starting Hotplug work...\n");
-    queue_delayed_work(wq, &decide_hotplug, HZ * 2);
-        
+    g_cluster_revive();       
 }
 
 static void mako_hotplug_early_suspend(struct early_suspend *handler)
 {         
-    queue_work(pm_wq, &suspend);
+    schedule_work(&suspend);
 }
 
 static void mako_hotplug_late_resume(struct early_suspend *handler)
 {  
-        queue_work(pm_wq, &resume);
+    schedule_work(&resume);
 }
 
-static struct early_suspend mako_hotplug_suspend =
+static struct early_suspend early_suspend =
 {
     .level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1,
-        .suspend = mako_hotplug_early_suspend,
-        .resume = mako_hotplug_late_resume,
+    .suspend = mako_hotplug_early_suspend,
+    .resume = mako_hotplug_late_resume,
 };
 
 /* sysfs functions for external driver */
@@ -314,43 +325,91 @@ unsigned int get_min_time_g_cluster()
 
 /* end sysfs functions from external driver */
 
-int __init mako_hotplug_init(void)
+static int __devinit mako_hotplug_probe(struct platform_device *pdev)
 {
-    pr_info("Mako Hotplug driver started.\n");
+        int ret = 0;
 
-	cpu_clk = clk_get_sys(NULL, "cpu");
-	cpu_g_clk = clk_get_sys(NULL, "cpu_g");
-	cpu_lp_clk = clk_get_sys(NULL, "cpu_lp");
-
-	if (NULL ==(cpu_clk) || (cpu_g_clk)==NULL || (cpu_lp_clk)==NULL)
-	{
-		pr_info("Error getting cpu clocks....");
-		return -ENOENT;
-	}
-
-    wq = alloc_ordered_workqueue("mako_hotplug_workqueue", 0);
+    wq = alloc_workqueue("mako_hotplug_workqueue", WQ_HIGHPRI | WQ_FREEZABLE, 0);
     
     if (!wq)
-        return -ENOMEM;
+        {
+                ret = -ENOMEM;
+                goto err;
+        }
 
-        pm_wq = alloc_workqueue("pm_workqueue", 0, 1);
-    
-    if (!pm_wq)
-        return -ENOMEM;
+		cpu_clk = clk_get_sys(NULL, "cpu");
+		cpu_g_clk = clk_get_sys(NULL, "cpu_g");
+		cpu_lp_clk = clk_get_sys(NULL, "cpu_lp");
+
+		if (NULL ==(cpu_clk) || (cpu_g_clk)==NULL || (cpu_lp_clk)==NULL)
+		{
+			pr_info("Error getting cpu clocks....");
+			return -ENOENT;
+		}
 
         stats.timestamp[0] = jiffies;
-        stats.timestamp[1] = jiffies;  
+        stats.timestamp[1] = jiffies;
 		stats.timestamp[2] = jiffies;
-		stats.g_cluster_active = true;  
+		stats.g_cluster_active = true; 
+        register_early_suspend(&early_suspend);
 
-
+        INIT_WORK(&suspend, mako_hotplug_suspend);
+        INIT_WORK(&resume, mako_hotplug_resume);
     INIT_DELAYED_WORK(&decide_hotplug, decide_hotplug_func);
-        INIT_WORK(&resume, resume_func);
-        INIT_WORK(&suspend, suspend_func);
-    queue_delayed_work(wq, &decide_hotplug, HZ*25);
-    
-    register_early_suspend(&mako_hotplug_suspend);
-    
-    return 0;
+
+        queue_delayed_work_on(0, wq, &decide_hotplug, HZ * 20);
+
+err:
+        return ret;        
 }
+
+static struct platform_device mako_hotplug_device = {
+  .name = MAKO_HOTPLUG,
+  .id = -1,
+};
+
+static int mako_hotplug_remove(struct platform_device *pdev)
+{
+	destroy_workqueue(wq);
+	return 0;
+}
+
+static struct platform_driver mako_hotplug_driver = {
+        .probe = mako_hotplug_probe,
+        .remove = mako_hotplug_remove,
+        .driver = {
+                .name = MAKO_HOTPLUG,
+                .owner = THIS_MODULE,
+        },
+};
+
+static int __init mako_hotplug_init(void)
+{
+        int ret;
+
+        ret = platform_driver_register(&mako_hotplug_driver);
+
+        if (ret)
+        {
+                return ret;
+        }
+
+        ret = platform_device_register(&mako_hotplug_device);
+
+        if (ret)
+        {
+                return ret;
+        }
+
+        pr_info("%s: init\n", MAKO_HOTPLUG);
+
+        return ret;
+}
+static void __exit mako_hotplug_exit(void)
+{
+        platform_device_unregister(&mako_hotplug_device);
+        platform_driver_unregister(&mako_hotplug_driver);
+}
+
 late_initcall(mako_hotplug_init);
+module_exit(mako_hotplug_exit);
