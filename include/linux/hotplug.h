@@ -16,28 +16,11 @@
 #define _LINUX_HOTPLUG_H
 
 extern void update_first_level(unsigned int level);
-extern void update_second_level(unsigned int level);
-extern void update_third_level(unsigned int level);
-extern void update_fourth_level(unsigned int level);
-extern void update_suspend_frequency(unsigned int freq);
-extern void update_cores_on_touch(unsigned int num);
+extern void update_min_time_g_cluster(unsigned int sec);
 
 extern unsigned int get_first_level(void);
-extern unsigned int get_second_level(void);
-extern unsigned int get_third_level(void);
-extern unsigned int get_fourth_level(void);
-extern unsigned int get_suspend_frequency(void);
-extern unsigned int get_cores_on_touch(void);
+extern unsigned int get_min_time_g_cluster(void);
 
-extern unsigned int get_input_boost_freq(void);
-extern unsigned int get_min_sample_time(void);
-extern bool get_dynamic_scaling(void);
-extern unsigned int get_hispeed_freq(void);
-
-extern bool is_touching;
-extern u64 freq_boosted_time;
-
-extern unsigned int report_load_at_max_freq(int cpu);
 
 #endif
 

@@ -32,7 +32,6 @@
 #include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/cpu-tegra.h>
 #include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/clock.h>
 
-
 extern int clk_set_parent(struct clk *c, struct clk *parent);
 
 static struct clk *cpu_clk;
@@ -40,7 +39,6 @@ static struct clk *cpu_g_clk;
 static struct clk *cpu_lp_clk;
 
 #define DEFAULT_FIRST_LEVEL 60
-#define DEFAULT_CORES_ON_TOUCH 2
 #define HIGH_LOAD_COUNTER 20
 #define TIMER HZ
 
@@ -51,15 +49,15 @@ static struct clk *cpu_lp_clk;
 static struct cpu_stats
 {
     unsigned int default_first_level;
-    unsigned int cores_on_touch;
     unsigned int counter[2];
     unsigned long timestamp[3];
+	unsigned int min_time_g_cluster;
 	bool g_cluster_active;
 } stats = {
     .default_first_level = DEFAULT_FIRST_LEVEL,
-    .cores_on_touch = DEFAULT_CORES_ON_TOUCH,
+	.min_time_g_cluster = MIN_TIME_G_ONLINE,
     .counter = {0},
-        .timestamp = {0},
+    .timestamp = {0},
 };
 
 struct cpu_load_data {
@@ -85,6 +83,7 @@ bool is_g_cluster()
 	mutex_unlock(&hotplug_lock);
 	return ret;
 }
+
 
 static inline int get_cpu_load(unsigned int cpu)
 {
@@ -146,7 +145,7 @@ static void g_cluster_smash()
 {
 	int cpu = 0;
 
-	if (time_is_after_jiffies(stats.timestamp[2] + MIN_TIME_G_ONLINE))
+	if (time_is_after_jiffies(stats.timestamp[2] + stats.min_time_g_cluster))
                 return;
 	for_each_online_cpu(cpu) 
     {
@@ -202,21 +201,7 @@ static void __ref decide_hotplug_func(struct work_struct *work)
         int i;
         int cpu_nr = 2;
         unsigned int cur_load;
-        
-    #if 0   
-        
-                for (i = num_online_cpus(); i < stats.cores_on_touch; i++)
-                {
-                        if (cpu_is_offline(i))
-                        {
-                                cpu_up(i);
-                                stats.timestamp[i-2] = ktime_to_ms(ktime_get());
-                        }
-                }
-				pr_info("Touch detected reque\n");
-                goto re_queue;
-        
-		#endif
+    
     for_each_online_cpu(cpu) 
     {
                 cur_load = get_cpu_load(cpu);
@@ -311,22 +296,22 @@ void update_first_level(unsigned int level)
     stats.default_first_level = level;
 }
 
-
-void update_cores_on_touch(unsigned int num)
+void update_min_time_g_cluster(unsigned int sec)
 {
-    stats.cores_on_touch = num;
+	stats.min_time_g_cluster = sec * TIMER;
 }
+
 
 unsigned int get_first_level()
 {
     return stats.default_first_level;
 }
 
-
-unsigned int get_cores_on_touch()
+unsigned int get_min_time_g_cluster()
 {
-    return stats.cores_on_touch;
+	return stats.min_time_g_cluster/TIMER;
 }
+
 /* end sysfs functions from external driver */
 
 int __init mako_hotplug_init(void)
@@ -357,6 +342,8 @@ int __init mako_hotplug_init(void)
         stats.timestamp[1] = jiffies;  
 		stats.timestamp[2] = jiffies;
 		stats.g_cluster_active = true;  
+
+	cpufreq_register_notifier(&min_lp_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
 
     INIT_DELAYED_WORK(&decide_hotplug, decide_hotplug_func);
         INIT_WORK(&resume, resume_func);
