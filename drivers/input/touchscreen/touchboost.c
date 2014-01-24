@@ -95,15 +95,15 @@ static void do_input_boost(struct work_struct *work)
 {
 	unsigned int i, ret;
 	struct cpufreq_policy policy;
-	
-	if(!is_g_cluster())
-		g_cluster_revive();
 
 	/* 
 	 * to avoid concurrency issues we cancel rem_input_boost
 	 * and wait for it to finish the work
 	 */
 	cancel_delayed_work_sync(&rem_input_boost);
+
+	if(!is_g_cluster())
+		g_cluster_revive();
 
 	boost_freq_buf = input_boost_freq;
 
