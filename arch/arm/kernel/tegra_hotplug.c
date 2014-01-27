@@ -343,7 +343,6 @@ int __init mako_hotplug_init(void)
 		stats.timestamp[2] = jiffies;
 		stats.g_cluster_active = true;  
 
-	cpufreq_register_notifier(&min_lp_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
 
     INIT_DELAYED_WORK(&decide_hotplug, decide_hotplug_func);
         INIT_WORK(&resume, resume_func);
