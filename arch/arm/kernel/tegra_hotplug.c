@@ -56,6 +56,7 @@ static struct cpu_stats
     unsigned long timestamp[3];
 	unsigned int min_time_g_cluster;
 	bool g_cluster_active;
+	atomic_t req_revive;
 } stats = {
     .default_first_level = DEFAULT_FIRST_LEVEL,
 	.min_time_g_cluster = MIN_TIME_G_ONLINE,
@@ -75,17 +76,26 @@ static struct delayed_work decide_hotplug;
 static struct work_struct suspend;
 static struct work_struct resume;
 
-static DEFINE_MUTEX(hotplug_lock);
 
-bool is_g_cluster()
+
+inline bool is_g_cluster()
 {
-	bool ret;
-	mutex_lock(&hotplug_lock);
-	ret = stats.g_cluster_active;
-	mutex_unlock(&hotplug_lock);
-	return ret;
+	return stats.g_cluster_active;
 }
 
+void set_g_revive()
+{
+	atomic_set(&stats.req_revive, 1);
+}
+void set_g_revive_done()
+{
+	atomic_set(&stats.req_revive, 0);
+}
+inline int get_g_revive()
+{
+	
+	return atomic_read(&stats.req_revive);
+}
 
 static inline int get_cpu_load(unsigned int cpu)
 {
@@ -117,16 +127,12 @@ static inline int get_cpu_load(unsigned int cpu)
 }
 inline void set_timestamp_g()
 {
-	mutex_lock(&hotplug_lock);
 	stats.timestamp[2] = jiffies;
-	mutex_unlock(&hotplug_lock);
 }
 inline unsigned long get_timestamp_g()
 {
 	unsigned long t;
-	mutex_lock(&hotplug_lock);
 	t = stats.timestamp[2];
-	mutex_unlock(&hotplug_lock);
 	return t;
 }
 
@@ -134,6 +140,7 @@ inline unsigned long get_timestamp_g()
 {
 	int cpu;
 
+	stats.g_cluster_active = true;
 	if(!clk_set_parent(cpu_clk, cpu_g_clk)) 
 	{
 		/*catch-up with governor target speed */
@@ -143,26 +150,25 @@ inline unsigned long get_timestamp_g()
 		pr_info("Running G Cluster\n");
 #endif
 	}
-	mutex_lock(&hotplug_lock);
+	
 	for(cpu = 0; cpu < 2; cpu++) 
     {
         if (!cpu_online(cpu)) 
-        {
             cpu_up(cpu);
-			stats.timestamp[cpu] = jiffies;
-        }
     }
-	stats.g_cluster_active = true;
-	stats.timestamp[2] = jiffies;
-	mutex_unlock(&hotplug_lock);
+	
+	set_timestamp_g();
 }
 
 static void g_cluster_smash()
 {
 	int cpu = 0;
 
+	
 	if (time_is_after_jiffies(get_timestamp_g() + stats.min_time_g_cluster))
                 return;
+
+	stats.g_cluster_active = false;
 	for_each_online_cpu(cpu) 
     {
         if (cpu) 
@@ -185,11 +191,9 @@ static void g_cluster_smash()
 #endif
 	}
 
-	mutex_lock(&hotplug_lock);
+	
 	stats.counter[0] = 0;
 	stats.counter[1] = 0;
-	stats.g_cluster_active = false;
-	mutex_unlock(&hotplug_lock);
 }
 static void cpu_revive(unsigned int cpu)
 {
@@ -216,7 +220,12 @@ static void __ref decide_hotplug_func(struct work_struct *work)
     int cpu;
         int cpu_nr = 2;
         unsigned int cur_load;
-    
+
+	if(!is_g_cluster() && get_g_revive() )
+	{
+		g_cluster_revive();
+		set_g_revive_done();
+	}
     for_each_online_cpu(cpu) 
     {
                 cur_load = get_cpu_load(cpu);
@@ -225,21 +234,17 @@ static void __ref decide_hotplug_func(struct work_struct *work)
                 {
                         if (likely(stats.counter[cpu] < HIGH_LOAD_COUNTER)) 
                                 {stats.counter[cpu] += 2; }
-
-                        if (cpu_is_offline(cpu_nr) && stats.counter[cpu] >= 10)
-                                cpu_revive(cpu_nr);
-						if(!is_g_cluster())
+						if( stats.counter[cpu] >= 10)
 						{
-							if(stats.counter[0] >= 10) 
+							if(!is_g_cluster())
 							{
 								g_cluster_revive();
 								break;
 							}
+							else if(cpu_is_offline(cpu_nr))
+								cpu_revive(cpu_nr);
 						}
-						else
-						{
-							set_timestamp_g();
-						}
+						set_timestamp_g();
 						
                 }
 
@@ -262,8 +267,9 @@ static void __ref decide_hotplug_func(struct work_struct *work)
                 if (cpu)
                         break;
         }
-
-re_queue:        
+	
+re_queue: 
+	       
     queue_delayed_work_on(0, wq, &decide_hotplug, msecs_to_jiffies(TIMER));
 }
 
@@ -351,6 +357,7 @@ static int __devinit mako_hotplug_probe(struct platform_device *pdev)
         stats.timestamp[1] = jiffies;
 		stats.timestamp[2] = jiffies;
 		stats.g_cluster_active = true; 
+		atomic_set(&stats.req_revive, 0);
         register_early_suspend(&early_suspend);
 
         INIT_WORK(&suspend, mako_hotplug_suspend);
