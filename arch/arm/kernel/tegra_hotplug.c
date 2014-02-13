@@ -30,8 +30,8 @@
 #include <linux/jiffies.h>
 
 #include <linux/clk.h>
-#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/cpu-tegra.h>
-#include </usr/src/cm10.1/kernel/asus/tf700t/arch/arm/mach-tegra/clock.h>
+#include <../arch/arm/mach-tegra/cpu-tegra.h>
+#include <../arch/arm/mach-tegra/clock.h>
 
 #include <linux/earlysuspend.h>
 
